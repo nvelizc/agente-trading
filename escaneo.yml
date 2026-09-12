@@ -1,0 +1,36 @@
+name: Escaneo de mercado
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # cada 1 hora, en punto
+  workflow_dispatch: {}    # te deja correrlo a mano desde GitHub para probar
+
+jobs:
+  escanear:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Correr el escáner
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python escaner.py
+
+      - name: Publicar el resultado en el repo
+        run: |
+          git config user.name "agente-trading-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add logs/latest.json
+          git diff --staged --quiet || git commit -m "Actualiza escaneo $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push

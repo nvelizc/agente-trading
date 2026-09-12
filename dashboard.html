@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agente de trading - Dashboard</title>
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --card: #ffffff;
+    --border: #e4e2da;
+    --text: #1c1c1a;
+    --text-secondary: #6b6a63;
+    --text-muted: #98978f;
+    --green-bg: #eaf3de; --green-text: #27500a;
+    --red-bg: #fcebeb; --red-text: #791f1f;
+    --amber-bg: #faeeda; --amber-text: #633806;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 8px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .header .updated { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+  button {
+    border: 1px solid var(--border); background: var(--card); border-radius: 8px;
+    padding: 8px 14px; font-size: 14px; cursor: pointer; color: var(--text);
+  }
+  button:hover { background: #f0efe9; }
+  .metrics {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px; margin-bottom: 20px;
+  }
+  .metric { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .metric .label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .metric .value { font-size: 22px; font-weight: 600; }
+  .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  select {
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    font-size: 13px; background: var(--card); color: var(--text);
+  }
+  .signal {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; margin-bottom: 10px;
+  }
+  .signal.sin-señal { opacity: 0.65; }
+  .signal-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .ticker { font-weight: 600; font-size: 15px; }
+  .setup { font-size: 12px; color: var(--text-muted); text-transform: capitalize; margin-left: 8px; }
+  .badges { display: flex; gap: 6px; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+  .badge.long { background: var(--green-bg); color: var(--green-text); }
+  .badge.short { background: var(--red-bg); color: var(--red-text); }
+  .badge.alta { background: var(--green-bg); color: var(--green-text); }
+  .badge.media { background: var(--amber-bg); color: var(--amber-text); }
+  .badge.baja { background: #eee; color: #555; }
+  .grid-datos {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 8px; font-size: 13px; margin-bottom: 8px;
+  }
+  .grid-datos .l { color: var(--text-muted); font-size: 11px; }
+  .grid-datos .v { font-weight: 600; }
+  .v.stop { color: var(--red-text); }
+  .v.obj { color: var(--green-text); }
+  .razon { font-size: 13px; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 8px; }
+  .empty { text-align: center; color: var(--text-muted); padding: 40px 0; font-size: 14px; }
+  .disclaimer { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 30px; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>Agente de trading</h1>
+      <div class="updated" id="updated-label">Cargando...</div>
+    </div>
+    <button id="refresh-btn">Actualizar</button>
+  </div>
+
+  <div class="metrics" id="metrics"></div>
+
+  <div class="filters">
+    <select id="filter-confianza">
+      <option value="todas">Toda confianza</option>
+      <option value="alta">Confianza alta</option>
+      <option value="media">Confianza media</option>
+      <option value="baja">Confianza baja</option>
+    </select>
+    <select id="filter-direccion">
+      <option value="todas">Long y short</option>
+      <option value="long">Solo long</option>
+      <option value="short">Solo short</option>
+    </select>
+  </div>
+
+  <div id="signals-list"></div>
+
+  <div class="disclaimer">Esto no es asesoría financiera. Verificá cada señal antes de operar en XTB.</div>
+
+<script>
+let currentData = null;
+
+function badgeDireccion(d) {
+  if (d === "long") return `<span class="badge long">↑ Long</span>`;
+  if (d === "short") return `<span class="badge short">↓ Short</span>`;
+  return "";
+}
+function badgeConfianza(c) {
+  if (!c) return "";
+  return `<span class="badge ${c}">Confianza ${c}</span>`;
+}
+
+function formatFecha(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderMetrics(resultados) {
+  const conSeñal = resultados.filter(r => r.hay_señal);
+  const altaConfianza = conSeñal.filter(r => r.confianza === "alta");
+  const ratios = conSeñal.map(r => r.ratio_riesgo_beneficio).filter(Boolean);
+  const ratioProm = ratios.length ? (ratios.reduce((a, b) => a + b, 0) / ratios.length).toFixed(1) : "-";
+
+  const metrics = [
+    { label: "Activos escaneados", value: resultados.length },
+    { label: "Señales encontradas", value: conSeñal.length },
+    { label: "Confianza alta", value: altaConfianza.length },
+    { label: "Ratio R:B promedio", value: ratioProm === "-" ? "-" : `1:${ratioProm}` }
+  ];
+
+  document.getElementById("metrics").innerHTML = metrics.map(m => `
+    <div class="metric">
+      <div class="label">${m.label}</div>
+      <div class="value">${m.value}</div>
+    </div>
+  `).join("");
+}
+
+function renderSignals() {
+  if (!currentData) return;
+  const confFiltro = document.getElementById("filter-confianza").value;
+  const dirFiltro = document.getElementById("filter-direccion").value;
+
+  let items = currentData.resultados.slice();
+  items = items.filter(r => {
+    if (confFiltro !== "todas" && r.confianza !== confFiltro) return false;
+    if (dirFiltro !== "todas" && r.direccion !== dirFiltro) return false;
+    return true;
+  });
+
+  const list = document.getElementById("signals-list");
+
+  if (items.length === 0) {
+    list.innerHTML = `<div class="empty">No hay resultados con estos filtros.</div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(r => {
+    if (!r.hay_señal) {
+      return `
+        <div class="signal sin-señal">
+          <div class="signal-top">
+            <span class="ticker">${r.ticker}</span>
+            <span class="setup" style="margin-left:0;">Sin señal</span>
+          </div>
+          <div class="razon">${r.razon || ""}</div>
+        </div>`;
+    }
+    return `
+      <div class="signal">
+        <div class="signal-top">
+          <div><span class="ticker">${r.ticker}</span><span class="setup">${r.tipo_setup || ""}</span></div>
+          <div class="badges">${badgeDireccion(r.direccion)}${badgeConfianza(r.confianza)}</div>
+        </div>
+        <div class="grid-datos">
+          <div><div class="l">Entrada</div><div class="v">${r.entrada}</div></div>
+          <div><div class="l">Stop loss</div><div class="v stop">${r.stop_loss}</div></div>
+          <div><div class="l">Objetivo</div><div class="v obj">${r.objetivo}</div></div>
+          <div><div class="l">Ratio R:B</div><div class="v">1:${r.ratio_riesgo_beneficio}</div></div>
+        </div>
+        <div class="razon">${r.razon || ""}</div>
+      </div>`;
+  }).join("");
+}
+
+async function loadData() {
+  document.getElementById("updated-label").textContent = "Cargando...";
+  try {
+    const res = await fetch("logs/latest.json?_=" + Date.now());
+    if (!res.ok) throw new Error("no data yet");
+    const data = await res.json();
+    currentData = data;
+    document.getElementById("updated-label").textContent = "Último escaneo: " + formatFecha(data.actualizado);
+    renderMetrics(data.resultados);
+    renderSignals();
+  } catch (e) {
+    document.getElementById("updated-label").textContent = "Todavía no hay datos (esperá al primer escaneo automático o corré el workflow a mano).";
+    document.getElementById("metrics").innerHTML = "";
+    document.getElementById("signals-list").innerHTML = "";
+  }
+}
+
+document.getElementById("filter-confianza").addEventListener("change", renderSignals);
+document.getElementById("filter-direccion").addEventListener("change", renderSignals);
+document.getElementById("refresh-btn").addEventListener("click", loadData);
+
+loadData();
+</script>
+</body>
+</html>
